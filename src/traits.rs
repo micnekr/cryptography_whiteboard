@@ -3,7 +3,7 @@ use std::vec::IntoIter;
 use crate::cyphers::simple::{CaesarCypherTransform, XorTransform};
 
 pub trait Serialisable {
-    fn to_byte_iter(&self) -> IntoIter<u8>;
+    fn to_crypto_iter(&self) -> IntoIter<u8>;
     fn from_byte_iter<I: Iterator<Item = u8> + ToOwned<Owned = I>>(b: &I) -> Self;
 }
 
