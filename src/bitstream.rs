@@ -1,4 +1,10 @@
-use std::{fmt::Debug, iter::once};
+use std::{
+    fmt::Debug,
+    iter::once,
+    ops::{Add, AddAssign},
+};
+
+use crate::traits::Serialisable;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SubByteValue {
@@ -12,15 +18,24 @@ impl SubByteValue {
     }
     pub fn add_bit(&mut self, bit: bool) {
         self.len += 1;
-        assert!(self.len <= 8, "The length can not be a byte or longer");
+        assert!(
+            self.len <= 8,
+            "The length of a SubByteValue can not be longer than a byte"
+        );
 
         self.val |= (bit as u8) << (8 - self.len);
     }
+
+    #[inline]
     pub fn clear(&mut self) {
         self.val = 0;
         self.len = 0;
     }
 
+    #[inline]
+    pub fn raw_value(&self) -> u8 {
+        self.val
+    }
     #[inline]
     pub fn len(&self) -> u8 {
         self.len
@@ -73,13 +88,13 @@ impl Debug for SubByteValue {
     }
 }
 
-#[derive(Clone)]
-pub struct BitStream {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BitVec {
     bytes: Vec<u8>,
     last_sub_byte: SubByteValue,
 }
 
-impl BitStream {
+impl BitVec {
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             bytes: Vec::with_capacity(cap),
@@ -93,7 +108,48 @@ impl BitStream {
         }
     }
 
-    pub fn push(&mut self, v: SubByteValue) {
+    // TODO: make sure this does not overflow
+    pub fn len(&self) -> usize {
+        self.bytes.len() * 8 + self.last_sub_byte.len as usize
+    }
+    pub fn clear(&mut self) {
+        self.bytes.clear();
+        self.last_sub_byte = SubByteValue::new();
+    }
+
+    #[inline]
+    pub fn bytes(&self) -> &Vec<u8> {
+        &self.bytes
+    }
+
+    #[inline]
+    pub fn last_sub_byte(&self) -> &SubByteValue {
+        &self.last_sub_byte
+    }
+}
+
+impl AddAssign<bool> for BitVec {
+    fn add_assign(&mut self, v: bool) {
+        self.last_sub_byte.add_bit(v);
+
+        if self.last_sub_byte.len == 8 {
+            self.bytes.push(self.last_sub_byte.val);
+            self.last_sub_byte = SubByteValue::new();
+        }
+    }
+}
+
+impl Add<bool> for BitVec {
+    type Output = BitVec;
+
+    fn add(mut self, v: bool) -> Self::Output {
+        self += v;
+        self
+    }
+}
+
+impl AddAssign<SubByteValue> for BitVec {
+    fn add_assign(&mut self, v: SubByteValue) {
         // append to the buffer and record the buffer if needed
         let last_byte_len = self.last_sub_byte.len;
         let v_len = v.len;
@@ -109,22 +165,51 @@ impl BitStream {
             self.bytes.push(self.last_sub_byte.val);
 
             self.last_sub_byte.len = len_sum - 8;
-            self.last_sub_byte.val = v.val << (8 - last_byte_len);
+            // TODO: find a way to do this without the checks
+            // NOTE: it would panic if the shift exceeds the bit width of the type
+            if last_byte_len == 0 {
+                self.last_sub_byte.clear();
+            } else {
+                self.last_sub_byte.val = v.val << (8 - last_byte_len);
+            }
         }
     }
+}
 
-    // TODO: make sure this does not overflow
-    pub fn len(&self) -> usize {
-        self.bytes.len() * 8 + self.last_sub_byte.len as usize
+impl Add<SubByteValue> for BitVec {
+    type Output = BitVec;
+
+    fn add(mut self, v: SubByteValue) -> Self::Output {
+        self += v;
+        self
+    }
+}
+
+impl AddAssign<BitVec> for BitVec {
+    fn add_assign(&mut self, v: BitVec) {
+        // TODO: do those extra allocations of the len byte matter? Should we optimise them?
+        v.bytes.into_iter().for_each(|b| {
+            *self += SubByteValue { len: 8, val: b };
+        });
+        *self += v.last_sub_byte;
+    }
+}
+
+impl Add<BitVec> for BitVec {
+    type Output = BitVec;
+
+    fn add(mut self, v: BitVec) -> Self::Output {
+        self += v;
+        self
     }
 }
 
 pub struct IntoIter {
-    stream: BitStream,
+    stream: BitVec,
     index: usize, // TODO: make sure it does not overflow
 }
 
-impl IntoIterator for BitStream {
+impl IntoIterator for BitVec {
     type Item = bool;
     type IntoIter = IntoIter;
     fn into_iter(self) -> Self::IntoIter {
@@ -164,7 +249,7 @@ impl Iterator for IntoIter {
     }
 }
 
-impl Debug for BitStream {
+impl Debug for BitVec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = self.bytes.iter().map(|b| format!("{:08b}", b));
 
@@ -174,6 +259,35 @@ impl Debug for BitStream {
             s.chain(once(self.last_sub_byte.clone().into())).collect()
         };
 
-        f.debug_struct("BitStream").field("data", &s).finish()
+        f.debug_struct("BitVec").field("data", &s).finish()
+    }
+}
+
+impl Serialisable for BitVec {
+    type CryptoIter = std::iter::Chain<
+        std::iter::Chain<std::iter::Once<u8>, std::iter::Once<u8>>,
+        std::vec::IntoIter<u8>,
+    >;
+
+    fn serialise(&self) -> Self::CryptoIter {
+        once(self.last_sub_byte.len)
+            .chain(once(self.last_sub_byte.val))
+            .chain(self.bytes.clone().into_iter())
+    }
+
+    fn deserialise<I: Iterator<Item = u8>>(mut b: I) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        // the first two bytes are the length of the "leftover" bits and their values.
+        if let (Some(len), Some(val)) = (b.next(), b.next()) {
+            let sub_byte_value = SubByteValue { val, len };
+            Some(BitVec {
+                last_sub_byte: sub_byte_value,
+                bytes: b.collect(),
+            })
+        } else {
+            None
+        }
     }
 }

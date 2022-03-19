@@ -1,10 +1,14 @@
-use std::vec::IntoIter;
+use std::{collections::BTreeMap, vec::IntoIter};
 
 use crate::cyphers::simple::{CaesarCypherTransform, XorTransform};
 
 pub trait Serialisable {
-    fn to_crypto_iter(&self) -> IntoIter<u8>;
-    fn from_byte_iter<I: Iterator<Item = u8> + ToOwned<Owned = I>>(b: &I) -> Self;
+    type CryptoIter;
+
+    fn serialise(&self) -> Self::CryptoIter;
+    fn deserialise<I: Iterator<Item = u8>>(b: I) -> Option<Self>
+    where
+        Self: Sized;
 }
 
 pub trait CryptographicIter: Iterator<Item = u8> {
@@ -42,6 +46,6 @@ pub trait InspectableState {
 impl<I: Iterator<Item = u8> + ToOwned<Owned = I>> InspectableState for I {
     #[inline]
     fn inspect_state(&self) -> String {
-        String::from_byte_iter(self)
+        String::deserialise(self.to_owned()).unwrap_or(String::from("<Ccount not parse>"))
     }
 }
