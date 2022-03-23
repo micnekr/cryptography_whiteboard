@@ -1,7 +1,4 @@
-use crate::{
-    bitstream::{BitVec, SubByteValue},
-    traits::InspectableState,
-};
+use crate::traits::InspectableState;
 use traits::Serialisable;
 
 use crate::compression::huffman::{self, HuffmanEncoding};

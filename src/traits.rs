@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, vec::IntoIter};
+use std::vec::IntoIter;
 
 use crate::cyphers::simple::{CaesarCypherTransform, XorTransform};
 
@@ -46,6 +46,6 @@ pub trait InspectableState {
 impl<I: Iterator<Item = u8> + ToOwned<Owned = I>> InspectableState for I {
     #[inline]
     fn inspect_state(&self) -> String {
-        String::deserialise(self.to_owned()).unwrap_or(String::from("<Ccount not parse>"))
+        String::deserialise(self.to_owned()).unwrap_or(String::from("<Could not parse>"))
     }
 }
