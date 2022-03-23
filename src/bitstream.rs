@@ -16,16 +16,6 @@ impl SubByteValue {
     pub fn new() -> Self {
         Self { len: 0, val: 0 }
     }
-    pub fn add_bit(&mut self, bit: bool) {
-        self.len += 1;
-        assert!(
-            self.len <= 8,
-            "The length of a SubByteValue can not be longer than a byte"
-        );
-
-        self.val |= (bit as u8) << (8 - self.len);
-    }
-
     #[inline]
     pub fn clear(&mut self) {
         self.val = 0;
@@ -42,6 +32,27 @@ impl SubByteValue {
     }
 }
 
+impl AddAssign<bool> for SubByteValue {
+    fn add_assign(&mut self, bit: bool) {
+        self.len += 1;
+        assert!(
+            self.len <= 8,
+            "The length of a SubByteValue can not be longer than a byte"
+        );
+
+        self.val |= (bit as u8) << (8 - self.len);
+    }
+}
+
+impl Add<bool> for SubByteValue {
+    type Output = SubByteValue;
+
+    fn add(mut self, v: bool) -> Self::Output {
+        self += v;
+        self
+    }
+}
+
 impl TryFrom<&str> for SubByteValue {
     type Error = std::io::Error;
 
@@ -50,10 +61,10 @@ impl TryFrom<&str> for SubByteValue {
         for c in value.chars() {
             match c {
                 '0' => {
-                    ret.add_bit(false);
+                    ret += false;
                 }
                 '1' => {
-                    ret.add_bit(true);
+                    ret += true;
                 }
                 _ => {
                     return Err(Self::Error::new(
@@ -130,7 +141,7 @@ impl BitVec {
 
 impl AddAssign<bool> for BitVec {
     fn add_assign(&mut self, v: bool) {
-        self.last_sub_byte.add_bit(v);
+        self.last_sub_byte += v;
 
         if self.last_sub_byte.len == 8 {
             self.bytes.push(self.last_sub_byte.val);
@@ -289,5 +300,30 @@ impl Serialisable for BitVec {
         } else {
             None
         }
+    }
+}
+
+impl TryFrom<&str> for BitVec {
+    type Error = std::io::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let mut ret = BitVec::new();
+        for c in value.chars() {
+            match c {
+                '0' => {
+                    ret += false;
+                }
+                '1' => {
+                    ret += true;
+                }
+                _ => {
+                    return Err(Self::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "The string has to contain only '0' and '1' characters",
+                    ));
+                }
+            };
+        }
+        Ok(ret)
     }
 }
